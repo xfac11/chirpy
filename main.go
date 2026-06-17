@@ -58,10 +58,10 @@ func main() {
 	}
 
 	serveMux := http.NewServeMux()
-	serveMux.Handle("GET /app/", apiConfig.middlewareMetricsInc(middlewareLog(fileServer)))
-	serveMux.Handle("/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
-	serveMux.Handle("GET /metrics", middlewareLog(http.HandlerFunc(apiConfig.metricsHandler)))
-	serveMux.Handle("GET /reset", middlewareLog(http.HandlerFunc(apiConfig.resetHandler)))
+	serveMux.Handle("/app/", apiConfig.middlewareMetricsInc(middlewareLog(fileServer)))
+	serveMux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
+	serveMux.Handle("GET /api/metrics", middlewareLog(http.HandlerFunc(apiConfig.metricsHandler)))
+	serveMux.Handle("POST /api/reset", middlewareLog(http.HandlerFunc(apiConfig.resetHandler)))
 
 	server := http.Server{
 		Addr:    ":8080",
