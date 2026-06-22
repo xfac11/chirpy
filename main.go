@@ -106,13 +106,13 @@ func validateChirpHandler(response http.ResponseWriter, request *http.Request) {
 		response.Write(jsonData)
 		return
 	}
-	splitBody := strings.Split(params.Body, "")
+	splitBody := strings.Split(params.Body, " ")
 	badWords := []string{"kerfuffle", "sharbert", "fornax"}
 	for i, word := range splitBody {
 		word = strings.ToLower(word)
 		for _, badWord := range badWords {
 			if strings.Contains(word, badWord) && len(word) == len(badWord) {
-				strings.ReplaceAll(word, badWord, "****")
+				word = strings.ReplaceAll(word, badWord, "****")
 				splitBody[i] = word
 				break
 			}
@@ -120,10 +120,10 @@ func validateChirpHandler(response http.ResponseWriter, request *http.Request) {
 	}
 
 	type returnVals struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 	respBody := returnVals{
-		Valid: true,
+		CleanedBody: strings.Join(splitBody, " "),
 	}
 	jsonData, err := json.Marshal(respBody)
 	if err != nil {
