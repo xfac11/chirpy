@@ -55,15 +55,20 @@ func writeJsondataError(text string) ([]byte, error) {
 	return jsonData, err
 }
 
-func writeJsondataValid() ([]byte, error) {
-	type returnVals struct {
-		Valid bool `json:"valid"`
+func removeProfanity(text string, badWords []string, replace string) string {
+	splitBody := strings.Split(text, " ")
+	for i, word := range splitBody {
+		word = strings.ToLower(word)
+		for _, badWord := range badWords {
+			if strings.Contains(word, badWord) && len(word) == len(badWord) {
+				word = strings.ReplaceAll(word, badWord, replace)
+				splitBody[i] = word
+				break
+			}
+		}
 	}
-	respBody := returnVals{
-		Valid: true,
-	}
-	jsonData, err := json.Marshal(respBody)
-	return jsonData, err
+
+	return strings.Join(splitBody, "")
 }
 
 func validateChirpHandler(response http.ResponseWriter, request *http.Request) {
@@ -78,12 +83,7 @@ func validateChirpHandler(response http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		log.Printf("Error decoding parameters: %s", err)
 		response.WriteHeader(http.StatusInternalServerError)
-		jsonData, err := writeJsondataError("Something went wrong")
-		if err != nil {
-			log.Printf("Error marshaling return values: %s", err)
-			response.Write([]byte("Error marshaling"))
-			return
-		}
+		jsonData, _ := writeJsondataError("Something went wrong")
 		response.Write(jsonData)
 		return
 	}
@@ -94,36 +94,21 @@ func validateChirpHandler(response http.ResponseWriter, request *http.Request) {
 		if err != nil {
 			log.Printf("Error Marshaling response body: %s", err)
 			response.WriteHeader(http.StatusInternalServerError)
-			jsonData, err := writeJsondataError("Something went wrong")
-			if err != nil {
-				log.Printf("Error marshaling return values: %s", err)
-				response.Write([]byte("Error marshaling"))
-				return
-			}
+			jsonData, _ := writeJsondataError("Something went wrong")
 			response.Write(jsonData)
 			return
 		}
 		response.Write(jsonData)
 		return
 	}
-	splitBody := strings.Split(params.Body, " ")
-	badWords := []string{"kerfuffle", "sharbert", "fornax"}
-	for i, word := range splitBody {
-		word = strings.ToLower(word)
-		for _, badWord := range badWords {
-			if strings.Contains(word, badWord) && len(word) == len(badWord) {
-				word = strings.ReplaceAll(word, badWord, "****")
-				splitBody[i] = word
-				break
-			}
-		}
-	}
 
+	badWords := []string{"kerfuffle", "sharbert", "fornax"}
+	censoredBody := removeProfanity(params.Body, badWords, "****")
 	type returnVals struct {
 		CleanedBody string `json:"cleaned_body"`
 	}
 	respBody := returnVals{
-		CleanedBody: strings.Join(splitBody, " "),
+		CleanedBody: censoredBody,
 	}
 	jsonData, err := json.Marshal(respBody)
 	if err != nil {
