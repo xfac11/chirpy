@@ -208,6 +208,45 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 
 }
 
+func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request *http.Request) {
+	dbChirps, err := cfg.dbQueries.GetAllChirps(request.Context())
+	if err != nil {
+		log.Printf("Error retreiving all chirps : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(errorMsg)
+		return
+	}
+
+	chirps := make([]Chirp, 0, len(dbChirps))
+	for _, dbChirp := range dbChirps {
+		chirps = append(chirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			Body:      dbChirp.Body,
+			User_ID:   dbChirp.UserID,
+		})
+	}
+
+	jsonChirps, err := json.Marshal(chirps)
+	if err != nil {
+		log.Printf("Could not marshal chirps into jsonchirps : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(errorMsg)
+		return
+	}
+
+	log.Printf("Retrieved all chirps and sending them")
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusOK)
+	response.Write(jsonChirps)
+
+}
+
 func middlewareLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s", r.Method, r.URL.Path)
@@ -274,6 +313,7 @@ func main() {
 	serveMux.Handle("/app/", apiConfig.middlewareMetricsInc(middlewareLog(fileServer)))
 	serveMux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
 	serveMux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiConfig.metricsHandler)))
+	serveMux.Handle("GET /api/chirps", middlewareLog(http.HandlerFunc(apiConfig.getAllChirpsHandler)))
 	serveMux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiConfig.resetHandler)))
 	serveMux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiConfig.createUserHandler)))
 	serveMux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiConfig.createChirpHandler)))
