@@ -30,6 +30,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	User_ID   uuid.UUID `json:"user_id"`
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -126,6 +134,80 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 	response.Write(jsonUser)
 }
 
+func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *http.Request) {
+	type parameters struct {
+		Body   string    `json:"body"`
+		UserId uuid.UUID `json:"user_id"`
+	}
+
+	var params parameters
+	decoder := json.NewDecoder(request.Body)
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Could not decode request body into a struct: %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(errorMsg)
+		return
+	}
+
+	if len(params.Body) > 140 {
+		response.WriteHeader(http.StatusBadRequest)
+		jsonData, err := writeJsondataError("Chirp is too long")
+		if err != nil {
+			log.Printf("Error Marshaling response body: %s", err)
+			response.WriteHeader(http.StatusInternalServerError)
+			jsonData, _ := writeJsondataError("Something went wrong")
+			response.Write(jsonData)
+			return
+		}
+		response.Write(jsonData)
+		return
+	}
+
+	badWords := []string{"kerfuffle", "sharbert", "fornax"}
+	censoredBody := removeProfanity(params.Body, badWords, "****")
+
+	createParams := database.CreateChirpParams{
+		UserID: params.UserId,
+		Body:   censoredBody,
+	}
+	dbChirp, err := cfg.dbQueries.CreateChirp(request.Context(), createParams)
+	if err != nil {
+		log.Printf("Error creating chirp : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong. Probably invalid user_id")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusConflict)
+		response.Write(errorMsg)
+		return
+	}
+
+	chirp := Chirp{
+		ID:        dbChirp.ID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		Body:      dbChirp.Body,
+		User_ID:   dbChirp.UserID,
+	}
+
+	jsonChirp, err := json.Marshal(chirp)
+	if err != nil {
+		log.Printf("Could not marshal to json encoding of main.User: %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+
+	log.Printf("Successfully created a chirp with id: %s", chirp.ID)
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusCreated)
+	response.Write(jsonChirp)
+
+}
+
 func middlewareLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s", r.Method, r.URL.Path)
@@ -157,56 +239,7 @@ func removeProfanity(text string, badWords []string, replace string) string {
 		}
 	}
 
-	return strings.Join(splitBody, "")
-}
-
-func validateChirpHandler(response http.ResponseWriter, request *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-
-	response.Header().Set("Content-Type", "application/json")
-	decoder := json.NewDecoder(request.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		log.Printf("Error decoding parameters: %s", err)
-		response.WriteHeader(http.StatusInternalServerError)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Write(jsonData)
-		return
-	}
-
-	if len(params.Body) > 140 {
-		response.WriteHeader(http.StatusBadRequest)
-		jsonData, err := writeJsondataError("Chirp is too long")
-		if err != nil {
-			log.Printf("Error Marshaling response body: %s", err)
-			response.WriteHeader(http.StatusInternalServerError)
-			jsonData, _ := writeJsondataError("Something went wrong")
-			response.Write(jsonData)
-			return
-		}
-		response.Write(jsonData)
-		return
-	}
-
-	badWords := []string{"kerfuffle", "sharbert", "fornax"}
-	censoredBody := removeProfanity(params.Body, badWords, "****")
-	type returnVals struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-	respBody := returnVals{
-		CleanedBody: censoredBody,
-	}
-	jsonData, err := json.Marshal(respBody)
-	if err != nil {
-		log.Printf("Error marshaling valid response body: %s", err)
-		response.Write([]byte("Error marshaling"))
-	}
-	response.WriteHeader(http.StatusOK)
-	response.Write(jsonData)
-
+	return strings.Join(splitBody, " ")
 }
 
 func healthzHandler(responseWrite http.ResponseWriter, request *http.Request) {
@@ -240,10 +273,10 @@ func main() {
 	serveMux := http.NewServeMux()
 	serveMux.Handle("/app/", apiConfig.middlewareMetricsInc(middlewareLog(fileServer)))
 	serveMux.Handle("GET /api/healthz", middlewareLog(http.HandlerFunc(healthzHandler)))
-	serveMux.Handle("POST /api/validate_chirp", middlewareLog(http.HandlerFunc(validateChirpHandler)))
 	serveMux.Handle("GET /admin/metrics", middlewareLog(http.HandlerFunc(apiConfig.metricsHandler)))
 	serveMux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiConfig.resetHandler)))
 	serveMux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiConfig.createUserHandler)))
+	serveMux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiConfig.createChirpHandler)))
 
 	server := http.Server{
 		Addr:    ":8080",
