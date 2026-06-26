@@ -208,6 +208,61 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 
 }
 
+func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *http.Request) {
+	chirpID := request.PathValue("chirpID")
+	if len(chirpID) == 0 {
+		log.Printf("Could not retrieve chirp beacuse it needs an id")
+		errorMsg, _ := writeJsondataError("Need a chirp id")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusNotFound)
+		response.Write(errorMsg)
+		return
+	}
+
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		log.Printf("Could not create a UUID from the pathvalue 'chirpID' : %s", err)
+		errorMsg, _ := writeJsondataError("Need a chirp id")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusNotFound)
+		response.Write(errorMsg)
+		return
+	}
+
+	chirpDB, err := cfg.dbQueries.GetChirp(request.Context(), chirpUUID)
+	if err != nil {
+		log.Printf("Could not retrieve a chirp from the database. Faulty id : %s", err)
+		errorMsg, _ := writeJsondataError("Need a chirp id")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusNotFound)
+		response.Write(errorMsg)
+		return
+	}
+
+	chirp := Chirp{
+		ID:        chirpDB.ID,
+		CreatedAt: chirpDB.CreatedAt,
+		UpdatedAt: chirpDB.UpdatedAt,
+		Body:      chirpDB.Body,
+		User_ID:   chirpDB.UserID,
+	}
+
+	chirpJson, err := json.Marshal(chirp)
+	if err != nil {
+		log.Printf("Could not marshal a chirp to json chrip : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusNotFound)
+		response.Write(errorMsg)
+		return
+	}
+
+	log.Printf("Successfully sent one chirp")
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusOK)
+	response.Write(chirpJson)
+}
+
 func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request *http.Request) {
 	dbChirps, err := cfg.dbQueries.GetAllChirps(request.Context())
 	if err != nil {
@@ -317,6 +372,7 @@ func main() {
 	serveMux.Handle("POST /admin/reset", middlewareLog(http.HandlerFunc(apiConfig.resetHandler)))
 	serveMux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiConfig.createUserHandler)))
 	serveMux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiConfig.createChirpHandler)))
+	serveMux.Handle("GET /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiConfig.getChirpHandler)))
 
 	server := http.Server{
 		Addr:    ":8080",
