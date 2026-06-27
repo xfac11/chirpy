@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/xfac11/chirpy/internal/auth"
 	"github.com/xfac11/chirpy/internal/database"
 )
 
@@ -86,7 +87,8 @@ func (cfg *apiConfig) resetHandler(responeWrite http.ResponseWriter, request *ht
 
 func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *http.Request) {
 	type parameters struct {
-		Email string `json:"email"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 	params := parameters{}
 	decoder := json.NewDecoder(request.Body)
@@ -100,10 +102,22 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 		return
 	}
 
-	email := params.Email
-	dbUser, err := cfg.dbQueries.CreateUser(request.Context(), email)
+	hashedPassword, err := auth.HashPassword(params.Password)
 	if err != nil {
-		log.Printf("Could not create a user using email: %s, error: %s", email, err)
+		log.Printf("Could not create a hash from that password : %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+	createUserParam := database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
+	}
+	dbUser, err := cfg.dbQueries.CreateUser(request.Context(), createUserParam)
+	if err != nil {
+		log.Printf("Could not create a user using email: %s, error: %s", params.Email, err)
 		jsonData, _ := writeJsondataError("A user with that email already exists")
 		response.Header().Set("Content-Type", "application/json")
 		response.WriteHeader(http.StatusConflict)
@@ -131,6 +145,67 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 	log.Printf("Successfully created a user with id: %s", user.ID)
 	response.Header().Set("Content-Type", "application/json")
 	response.WriteHeader(http.StatusCreated)
+	response.Write(jsonUser)
+}
+
+func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.Request) {
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	var params parameters
+	decoder := json.NewDecoder(request.Body)
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Could not decode request body into a struct: %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(errorMsg)
+		return
+	}
+
+	dbUser, err := cfg.dbQueries.GetUserByEmail(request.Context(), params.Email)
+	if err != nil {
+		log.Printf("Could not found a user with the email: %s. Error : %s", params.Email, err)
+		errorMsg, _ := writeJsondataError("Incorrect email or password")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	match, err := auth.CheckPasswordHash(params.Password, dbUser.HashedPassword)
+	if err != nil || match == false {
+		log.Printf("Could not match password. Error : %s", err)
+		errorMsg, _ := writeJsondataError("Incorrect email or password")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	user := User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+	}
+
+	jsonUser, err := json.Marshal(user)
+	if err != nil {
+		log.Printf("Could not marshal to json encoding of main.User: %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+
+	log.Printf("Email and password matched. Sending user resource")
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusOK)
 	response.Write(jsonUser)
 }
 
@@ -373,6 +448,7 @@ func main() {
 	serveMux.Handle("POST /api/users", middlewareLog(http.HandlerFunc(apiConfig.createUserHandler)))
 	serveMux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiConfig.createChirpHandler)))
 	serveMux.Handle("GET /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiConfig.getChirpHandler)))
+	serveMux.Handle("POST /api/login", middlewareLog(http.HandlerFunc(apiConfig.loginHandler)))
 
 	server := http.Server{
 		Addr:    ":8080",
