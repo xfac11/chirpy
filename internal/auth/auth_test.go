@@ -1,6 +1,11 @@
 package auth
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+)
 
 func TestCreateHash(t *testing.T) {
 	_, err := HashPassword("pass%or#")
@@ -34,5 +39,60 @@ func TestShouldNotMatch(t *testing.T) {
 
 	if match == true {
 		t.Errorf("Should not match letter1234 with hashed word1234")
+	}
+}
+
+func TestMakingJWTToken(t *testing.T) {
+	id := uuid.New()
+	mySigningKey := []byte("AllYourBase")
+	expiresIn, _ := time.ParseDuration("1s")
+
+	signedToken, err := MakeJWT(id, string(mySigningKey), expiresIn)
+	if err != nil {
+		t.Errorf("Could not Make a JWT : %s", err)
+	}
+
+	validID, err := ValidateJWT(signedToken, string(mySigningKey))
+	if err != nil {
+		t.Errorf("Should validate correctly : %s", err)
+	}
+
+	if validID != id {
+		t.Errorf("valid id and id should be the same")
+	}
+}
+
+func TestExpiredToken(t *testing.T) {
+	id := uuid.New()
+	mySigningKey := []byte("AllYourBase")
+	expiresIn, _ := time.ParseDuration("1s")
+
+	signedToken, err := MakeJWT(id, string(mySigningKey), expiresIn)
+	if err != nil {
+		t.Errorf("Could not Make a JWT : %s", err)
+	}
+
+	time.Sleep(time.Duration(time.Second * 2))
+
+	_, err = ValidateJWT(signedToken, string(mySigningKey))
+	if err == nil {
+		t.Errorf("Should be rejected beacuse it is expired")
+	}
+
+}
+
+func TestWrongSecretToken(t *testing.T) {
+	id := uuid.New()
+	mySigningKey := []byte("AllYourBase")
+	expiresIn, _ := time.ParseDuration("1s")
+
+	signedToken, err := MakeJWT(id, string(mySigningKey), expiresIn)
+	if err != nil {
+		t.Errorf("Could not Make a JWT : %s", err)
+	}
+
+	_, err = ValidateJWT(signedToken, "NoneOfYourBase")
+	if err == nil {
+		t.Errorf("Should be rejected because of wrong secret")
 	}
 }
