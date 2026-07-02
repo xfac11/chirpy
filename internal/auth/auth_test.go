@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -94,5 +95,27 @@ func TestWrongSecretToken(t *testing.T) {
 	_, err = ValidateJWT(signedToken, "NoneOfYourBase")
 	if err == nil {
 		t.Errorf("Should be rejected because of wrong secret")
+	}
+}
+
+func TestAuthHeader(t *testing.T) {
+	header := http.Header{}
+	header.Add("Authorization", "Bearer 231mkjnasd82")
+	token, err := GetBearerToken(header)
+	if err != nil {
+		t.Errorf("Could not find token : %s", err)
+	}
+
+	if token != "231mkjnasd82" {
+		t.Errorf("Token is not the same. It should be 231mkjnasd82 but is %s", token)
+	}
+}
+
+func TestAuthHeaderInvalidSyntax(t *testing.T) {
+	header := http.Header{}
+	header.Add("Authorization", "Token 231mkjnasd82")
+	_, err := GetBearerToken(header)
+	if err == nil {
+		t.Error("Should error cause wrong syntax in the Authorization header")
 	}
 }
