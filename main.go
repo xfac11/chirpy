@@ -22,6 +22,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+	jwtSecret      string
 }
 
 type User struct {
@@ -150,8 +151,9 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 
 func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.Request) {
 	type parameters struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
+		Password         string `json:"password"`
+		Email            string `json:"email"`
+		ExpiresInSeconds *int   `json:"expires_in_seconds,omitempty"`
 	}
 
 	var params parameters
@@ -164,6 +166,15 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		response.WriteHeader(http.StatusInternalServerError)
 		response.Write(errorMsg)
 		return
+	}
+
+	expirationTime, err := time.ParseDuration("1h")
+	if params.ExpiresInSeconds != nil {
+		expirationTime = time.Duration(*params.ExpiresInSeconds * int(time.Second))
+	}
+
+	if expirationTime > time.Hour {
+		expirationTime = time.Hour
 	}
 
 	dbUser, err := cfg.dbQueries.GetUserByEmail(request.Context(), params.Email)
@@ -186,14 +197,33 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		return
 	}
 
-	user := User{
+	signedToken, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, expirationTime)
+	if err != nil {
+		log.Printf("Could not create a signed token : %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+
+	type Body struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+		Token     string    `json:"token"`
+	}
+
+	body := Body{
 		ID:        dbUser.ID,
 		CreatedAt: dbUser.CreatedAt,
 		UpdatedAt: dbUser.UpdatedAt,
 		Email:     dbUser.Email,
+		Token:     signedToken,
 	}
 
-	jsonUser, err := json.Marshal(user)
+	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		log.Printf("Could not marshal to json encoding of main.User: %s", err)
 		jsonData, _ := writeJsondataError("Something went wrong")
@@ -206,7 +236,7 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 	log.Printf("Email and password matched. Sending user resource")
 	response.Header().Set("Content-Type", "application/json")
 	response.WriteHeader(http.StatusOK)
-	response.Write(jsonUser)
+	response.Write(jsonBody)
 }
 
 func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *http.Request) {
@@ -425,7 +455,7 @@ func main() {
 		log.Fatalf("Error loading .env file: %s", err)
 	}
 	dbURL := os.Getenv("DB_URL")
-
+	jwtSecret := os.Getenv("JWT_SECRET")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Error connecting to database: %s ", err)
@@ -437,6 +467,7 @@ func main() {
 		fileserverHits: atomic.Int32{},
 		dbQueries:      database.New(db),
 		platform:       os.Getenv("PLATFORM"),
+		jwtSecret:      jwtSecret,
 	}
 
 	serveMux := http.NewServeMux()
