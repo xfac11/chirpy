@@ -46,6 +46,7 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 
 }
 
+// If valid this returns the id and a nil error.
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (any, error) {
 		return []byte(tokenSecret), nil
@@ -65,6 +66,8 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 
 }
 
+// Returns the Bearer token in the header.
+// If no Authorization header is present or no Bearer were found an error and an empty string is returned
 func GetBearerToken(headers http.Header) (string, error) {
 	authHeader := headers.Get("Authorization")
 	if authHeader == "" {

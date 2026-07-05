@@ -241,13 +241,31 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 
 func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *http.Request) {
 	type parameters struct {
-		Body   string    `json:"body"`
-		UserId uuid.UUID `json:"user_id"`
+		Body string `json:"body"`
 	}
 
+	bearerToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		log.Printf("No bearer token in request header : %s", err)
+		errorMsg, _ := writeJsondataError("Unauthorized")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+
+	}
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Non valid bearer token : %s", err)
+		errorMsg, _ := writeJsondataError("Unauthorized")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
 	var params parameters
 	decoder := json.NewDecoder(request.Body)
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		log.Printf("Could not decode request body into a struct: %s", err)
 		errorMsg, _ := writeJsondataError("Something went wrong")
@@ -275,7 +293,7 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 	censoredBody := removeProfanity(params.Body, badWords, "****")
 
 	createParams := database.CreateChirpParams{
-		UserID: params.UserId,
+		UserID: userID,
 		Body:   censoredBody,
 	}
 	dbChirp, err := cfg.dbQueries.CreateChirp(request.Context(), createParams)
