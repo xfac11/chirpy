@@ -151,9 +151,8 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 
 func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.Request) {
 	type parameters struct {
-		Password         string `json:"password"`
-		Email            string `json:"email"`
-		ExpiresInSeconds *int   `json:"expires_in_seconds,omitempty"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	var params parameters
@@ -166,15 +165,6 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		response.WriteHeader(http.StatusInternalServerError)
 		response.Write(errorMsg)
 		return
-	}
-
-	expirationTime, err := time.ParseDuration("1h")
-	if params.ExpiresInSeconds != nil {
-		expirationTime = time.Duration(*params.ExpiresInSeconds * int(time.Second))
-	}
-
-	if expirationTime > time.Hour {
-		expirationTime = time.Hour
 	}
 
 	dbUser, err := cfg.dbQueries.GetUserByEmail(request.Context(), params.Email)
@@ -197,7 +187,8 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		return
 	}
 
-	signedToken, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, expirationTime)
+	tokenExpirationTime, err := time.ParseDuration("1h")
+	signedToken, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, tokenExpirationTime)
 	if err != nil {
 		log.Printf("Could not create a signed token : %s", err)
 		jsonData, _ := writeJsondataError("Something went wrong")
@@ -207,20 +198,40 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		return
 	}
 
+	refreshTokenExpirationTime, _ := time.ParseDuration("1440h")
+	refreshToken := auth.MakeRefreshToken()
+	createRTokenParams := database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    dbUser.ID,
+		ExpiresAt: time.Now().Add(refreshTokenExpirationTime),
+	}
+
+	dbRefreshToken, err := cfg.dbQueries.CreateRefreshToken(request.Context(), createRTokenParams)
+	if err != nil {
+		log.Printf("Could not create a refresh token inside db: %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+	log.Printf("Created a refresh token inside database at %s", dbRefreshToken.CreatedAt)
 	type Body struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-		Token     string    `json:"token"`
+		ID           uuid.UUID `json:"id"`
+		CreatedAt    time.Time `json:"created_at"`
+		UpdatedAt    time.Time `json:"updated_at"`
+		Email        string    `json:"email"`
+		Token        string    `json:"token"`
+		RefreshToken string    `json:"refresh_token"`
 	}
 
 	body := Body{
-		ID:        dbUser.ID,
-		CreatedAt: dbUser.CreatedAt,
-		UpdatedAt: dbUser.UpdatedAt,
-		Email:     dbUser.Email,
-		Token:     signedToken,
+		ID:           dbUser.ID,
+		CreatedAt:    dbUser.CreatedAt,
+		UpdatedAt:    dbUser.UpdatedAt,
+		Email:        dbUser.Email,
+		Token:        signedToken,
+		RefreshToken: refreshToken,
 	}
 
 	jsonBody, err := json.Marshal(body)
