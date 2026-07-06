@@ -436,6 +436,78 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 
 }
 
+func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http.Request) {
+	bearerToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		log.Printf("No bearer token found : %s", err)
+		errorMsg, _ := writeJsondataError("Refresh token required in the header")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	refreshToken, err := cfg.dbQueries.GetRefreshToken(request.Context(), bearerToken)
+	if err != nil {
+		log.Printf("No refresh token found in db : %s", err)
+		errorMsg, _ := writeJsondataError("Refresh token not present in the database")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+	if refreshToken.RevokedAt.Valid || refreshToken.ExpiresAt.Before(time.Now()) {
+		log.Printf("Refresh token expired or revoked")
+		errorMsg, _ := writeJsondataError("Refresh token expired or revoked")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	type Body struct {
+		Token string `json:"token"`
+	}
+	user, err := cfg.dbQueries.GetUserFromRefreshToken(request.Context(), refreshToken.Token)
+	if err != nil {
+		log.Printf("Could not find a user related to that refresh token : %s", err)
+		errorMsg, _ := writeJsondataError("Not valid refresh token")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	expirationTime, _ := time.ParseDuration("1h")
+	accessToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, expirationTime)
+	if err != nil {
+		log.Printf("Could not create access token : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	body := Body{
+		Token: accessToken,
+	}
+
+	bodyJson, err := json.Marshal(body)
+	if err != nil {
+		log.Printf("Could not marshal a body to json body : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(errorMsg)
+		return
+	}
+
+	log.Printf("Successfully refreshed token")
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusOK)
+	response.Write(bodyJson)
+}
 func middlewareLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s", r.Method, r.URL.Path)
@@ -509,7 +581,7 @@ func main() {
 	serveMux.Handle("POST /api/chirps", middlewareLog(http.HandlerFunc(apiConfig.createChirpHandler)))
 	serveMux.Handle("GET /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiConfig.getChirpHandler)))
 	serveMux.Handle("POST /api/login", middlewareLog(http.HandlerFunc(apiConfig.loginHandler)))
-
+	serveMux.Handle("POST /api/refresh", middlewareLog(http.HandlerFunc(apiConfig.refreshHandler)))
 	server := http.Server{
 		Addr:    ":8080",
 		Handler: serveMux,
