@@ -508,6 +508,42 @@ func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http
 	response.WriteHeader(http.StatusOK)
 	response.Write(bodyJson)
 }
+
+func (cfg *apiConfig) revokeHandler(response http.ResponseWriter, request *http.Request) {
+	bearerToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		log.Printf("No bearer token found : %s", err)
+		errorMsg, _ := writeJsondataError("Refresh token required in the header")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	refreshToken, err := cfg.dbQueries.GetRefreshToken(request.Context(), bearerToken)
+	if err != nil {
+		log.Printf("No refresh token found in db : %s", err)
+		errorMsg, _ := writeJsondataError("Refresh token not present in the database")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	err = cfg.dbQueries.UpdateRefreshToken(request.Context(), refreshToken.Token)
+	if err != nil {
+		log.Printf("Could not revoke refresh token in db : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong when revoking")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(errorMsg)
+		return
+	}
+
+	log.Printf("Successfully revoked refresh token")
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func middlewareLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s", r.Method, r.URL.Path)
@@ -582,6 +618,7 @@ func main() {
 	serveMux.Handle("GET /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiConfig.getChirpHandler)))
 	serveMux.Handle("POST /api/login", middlewareLog(http.HandlerFunc(apiConfig.loginHandler)))
 	serveMux.Handle("POST /api/refresh", middlewareLog(http.HandlerFunc(apiConfig.refreshHandler)))
+	serveMux.Handle("POST /api/revoke", middlewareLog(http.HandlerFunc(apiConfig.revokeHandler)))
 	server := http.Server{
 		Addr:    ":8080",
 		Handler: serveMux,

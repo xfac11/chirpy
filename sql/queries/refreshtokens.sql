@@ -12,3 +12,8 @@ SELECT users.* FROM users
 INNER JOIN refresh_tokens
 ON refresh_tokens.user_id = users.id
 WHERE refresh_tokens.token = $1;
+
+-- name: UpdateRefreshToken :exec
+UPDATE refresh_tokens
+SET revoked_at = NOW(), updated_at = NOW()
+WHERE token = $1;
