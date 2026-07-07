@@ -544,6 +544,91 @@ func (cfg *apiConfig) revokeHandler(response http.ResponseWriter, request *http.
 	response.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	var params parameters
+	decoder := json.NewDecoder(request.Body)
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Could not decode request body to a parameters : %s", err)
+		errorMsg, _ := writeJsondataError("Wrong paramters inside of body. Need new email and new password")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusBadRequest)
+		response.Write(errorMsg)
+		return
+	}
+
+	bearerToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		log.Printf("No bearer token found : %s", err)
+		errorMsg, _ := writeJsondataError("Access token required in the header")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Invalid access token : %s", err)
+		errorMsg, _ := writeJsondataError("Invalid access token")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		log.Printf("Could not create a hash from that password : %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+
+	dbParams := database.SetUserPasswordAndEmailParams{
+		ID:             userID,
+		HashedPassword: hashedPassword,
+		Email:          params.Email,
+	}
+	updatedUser, err := cfg.dbQueries.SetUserPasswordAndEmail(request.Context(), dbParams)
+	if err != nil {
+		log.Printf("Could not update users' email and password : %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong when updating the user")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+
+	userResource := User{
+		ID:        updatedUser.ID,
+		CreatedAt: updatedUser.CreatedAt,
+		UpdatedAt: updatedUser.UpdatedAt,
+		Email:     updatedUser.Email,
+	}
+	userData, err := json.Marshal(userResource)
+	if err != nil {
+		log.Printf("Could not marshal updated user to user resource : %s", err)
+		jsonData, _ := writeJsondataError("Something went wrong")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(jsonData)
+		return
+	}
+
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusOK)
+	response.Write(userData)
+	log.Printf("Successfully updated user email and password")
+
+}
+
 func middlewareLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s", r.Method, r.URL.Path)
@@ -619,6 +704,7 @@ func main() {
 	serveMux.Handle("POST /api/login", middlewareLog(http.HandlerFunc(apiConfig.loginHandler)))
 	serveMux.Handle("POST /api/refresh", middlewareLog(http.HandlerFunc(apiConfig.refreshHandler)))
 	serveMux.Handle("POST /api/revoke", middlewareLog(http.HandlerFunc(apiConfig.revokeHandler)))
+	serveMux.Handle("PUT /api/users", middlewareLog(http.HandlerFunc(apiConfig.updateUserHandler)))
 	server := http.Server{
 		Addr:    ":8080",
 		Handler: serveMux,
