@@ -629,6 +629,70 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 
 }
 
+func (cfg *apiConfig) deleteChirpByIDHandler(response http.ResponseWriter, request *http.Request) {
+	chirpID := request.PathValue("chirpID")
+	if len(chirpID) == 0 {
+		log.Printf("Could not retrieve chirp beacuse it needs an id")
+		errorMsg, _ := writeJsondataError("Need a chirp id")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusBadRequest)
+		response.Write(errorMsg)
+		return
+	}
+
+	bearerToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		log.Printf("Could not find a token in the header : %s", err)
+		errorMsg, _ := writeJsondataError("Need a token in the header")
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Non valid bearer token : %s", err)
+		errorMsg, _ := writeJsondataError("Unauthorized")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusUnauthorized)
+		response.Write(errorMsg)
+		return
+	}
+
+	chirp, err := cfg.dbQueries.GetChirp(request.Context(), uuid.MustParse(chirpID))
+	if err != nil {
+		log.Printf("Could not retrieve chirp from database : %s", err)
+		errorMsg, _ := writeJsondataError("No chirp with that id found")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusNotFound)
+		response.Write(errorMsg)
+		return
+	}
+
+	if chirp.UserID != userID {
+		log.Printf("The user is not the owner of the chirp")
+		errorMsg, _ := writeJsondataError("Not the owner of the chirp")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusForbidden)
+		response.Write(errorMsg)
+		return
+	}
+
+	err = cfg.dbQueries.DeleteChirp(request.Context(), chirp.ID)
+	if err != nil {
+		log.Printf("The chirp could not be deleted : %s", err)
+		errorMsg, _ := writeJsondataError("Something went wrong when deleting the chirp")
+		response.Header().Set("Content-Type", "json/application")
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write(errorMsg)
+		return
+	}
+
+	log.Printf("The chirp with id: %s was deleted by the author: %s", chirp.ID, userID)
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func middlewareLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s %s", r.Method, r.URL.Path)
@@ -705,6 +769,7 @@ func main() {
 	serveMux.Handle("POST /api/refresh", middlewareLog(http.HandlerFunc(apiConfig.refreshHandler)))
 	serveMux.Handle("POST /api/revoke", middlewareLog(http.HandlerFunc(apiConfig.revokeHandler)))
 	serveMux.Handle("PUT /api/users", middlewareLog(http.HandlerFunc(apiConfig.updateUserHandler)))
+	serveMux.Handle("DELETE /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiConfig.deleteChirpByIDHandler)))
 	server := http.Server{
 		Addr:    ":8080",
 		Handler: serveMux,
