@@ -58,12 +58,7 @@ func (cfg *apiConfig) metricsHandler(responseWrite http.ResponseWriter, request 
 
 func (cfg *apiConfig) resetHandler(responeWrite http.ResponseWriter, request *http.Request) {
 	if cfg.platform != "dev" {
-		jsonData, _ := writeJsondataError("Forbidden request")
-
-		responeWrite.Header().Set("Content-Type", "application/json")
-		responeWrite.WriteHeader(http.StatusForbidden)
-		responeWrite.Write(jsonData)
-
+		respondWithError(responeWrite, http.StatusForbidden, "Wrong platform", "Forbidden request")
 		return
 	}
 
@@ -149,6 +144,14 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 	response.Write(jsonUser)
 }
 
+func respondWithError(response http.ResponseWriter, statusCode int, logMsg, clientMsg string) {
+	log.Printf(logMsg)
+	errorMsg, _ := writeJsondataError(clientMsg)
+	response.Header().Set("Content-Type", "json/application")
+	response.WriteHeader(statusCode)
+	response.Write(errorMsg)
+}
+
 func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.Request) {
 	type parameters struct {
 		Password string `json:"password"`
@@ -159,42 +162,26 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 	decoder := json.NewDecoder(request.Body)
 	err := decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Could not decode request body into a struct: %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not decode request body into a struct: %s", err), "Something went wrong")
 		return
 	}
 
 	dbUser, err := cfg.dbQueries.GetUserByEmail(request.Context(), params.Email)
 	if err != nil {
-		log.Printf("Could not found a user with the email: %s. Error : %s", params.Email, err)
-		errorMsg, _ := writeJsondataError("Incorrect email or password")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Could not found a user with the email: %s. Error : %s", params.Email, err), "Incorrect email or password")
 		return
 	}
 
 	match, err := auth.CheckPasswordHash(params.Password, dbUser.HashedPassword)
 	if err != nil || match == false {
-		log.Printf("Could not match password. Error : %s", err)
-		errorMsg, _ := writeJsondataError("Incorrect email or password")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Could not match password. Error : %s", err), "Incorrect email or password")
 		return
 	}
 
 	tokenExpirationTime, err := time.ParseDuration("1h")
 	signedToken, err := auth.MakeJWT(dbUser.ID, cfg.jwtSecret, tokenExpirationTime)
 	if err != nil {
-		log.Printf("Could not create a signed token : %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not create a signed token : %s", err), "Something went wrong")
 		return
 	}
 
@@ -205,14 +192,9 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		UserID:    dbUser.ID,
 		ExpiresAt: time.Now().Add(refreshTokenExpirationTime),
 	}
-
 	dbRefreshToken, err := cfg.dbQueries.CreateRefreshToken(request.Context(), createRTokenParams)
 	if err != nil {
-		log.Printf("Could not create a refresh token inside db: %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not create a refresh token inside db: %s", err), "Something went wrong")
 		return
 	}
 	log.Printf("Created a refresh token inside database at %s", dbRefreshToken.CreatedAt)
@@ -236,11 +218,7 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		log.Printf("Could not marshal to json encoding of main.User: %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal to json encoding of main.User: %s", err), "Something went wrong on the server")
 		return
 	}
 
