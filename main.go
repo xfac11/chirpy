@@ -66,12 +66,7 @@ func (cfg *apiConfig) resetHandler(responeWrite http.ResponseWriter, request *ht
 
 	err := cfg.dbQueries.DeleteAllUsers(request.Context())
 	if err != nil {
-		jsonData, _ := writeJsondataError("Something went wrong when deleting all users")
-
-		responeWrite.Header().Set("Content-Type", "application/json")
-		responeWrite.WriteHeader(http.StatusInternalServerError)
-		responeWrite.Write(jsonData)
-
+		respondWithError(responeWrite, http.StatusInternalServerError, fmt.Sprintf("Could not delete all users : %s", err), "Something went wrong when deleting all users")
 		return
 	}
 
@@ -90,21 +85,13 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 	decoder := json.NewDecoder(request.Body)
 	err := decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Could not decode request body into a struct: %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not decode request body into a struct: %s", err), "Something went wrong")
 		return
 	}
 
 	hashedPassword, err := auth.HashPassword(params.Password)
 	if err != nil {
-		log.Printf("Could not create a hash from that password : %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not create a hash from that password : %s", err), "Something went wrong")
 		return
 	}
 	createUserParam := database.CreateUserParams{
@@ -113,11 +100,7 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 	}
 	dbUser, err := cfg.dbQueries.CreateUser(request.Context(), createUserParam)
 	if err != nil {
-		log.Printf("Could not create a user using email: %s, error: %s", params.Email, err)
-		jsonData, _ := writeJsondataError("A user with that email already exists")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusConflict)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusConflict, fmt.Sprintf("Could not create a user using email: %s, error: %s", params.Email, err), "A user with that email already exists")
 		return
 	}
 
@@ -130,11 +113,7 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 
 	jsonUser, err := json.Marshal(user)
 	if err != nil {
-		log.Printf("Could not marshal to json encoding of main.User: %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal to json encoding of main.User: %s", err), "Something went wrong")
 		return
 	}
 
@@ -531,41 +510,25 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 	decoder := json.NewDecoder(request.Body)
 	err := decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Could not decode request body to a parameters : %s", err)
-		errorMsg, _ := writeJsondataError("Wrong paramters inside of body. Need new email and new password")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusBadRequest)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusBadRequest, fmt.Sprintf("Could not decode request body to a parameters : %s", err), "Wrong parameters inside of body. Need new email and new password")
 		return
 	}
 
 	bearerToken, err := auth.GetBearerToken(request.Header)
 	if err != nil {
-		log.Printf("No bearer token found : %s", err)
-		errorMsg, _ := writeJsondataError("Access token required in the header")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token found : %s", err), "Access token required in the header")
 		return
 	}
 
 	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
 	if err != nil {
-		log.Printf("Invalid access token : %s", err)
-		errorMsg, _ := writeJsondataError("Invalid access token")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Invalid access token : %s", err), "Invalid access token")
 		return
 	}
 
 	hashedPassword, err := auth.HashPassword(params.Password)
 	if err != nil {
-		log.Printf("Could not create a hash from that password : %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not create a hash from that password : %s", err), "Something went wrong")
 		return
 	}
 
@@ -576,11 +539,7 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 	}
 	updatedUser, err := cfg.dbQueries.SetUserPasswordAndEmail(request.Context(), dbParams)
 	if err != nil {
-		log.Printf("Could not update users' email and password : %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong when updating the user")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not update users' email and password : %s", err), "Something went wrong when updating the user")
 		return
 	}
 
@@ -592,11 +551,7 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 	}
 	userData, err := json.Marshal(userResource)
 	if err != nil {
-		log.Printf("Could not marshal updated user to user resource : %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal updated user to user resource : %s", err), "Something went wrong")
 		return
 	}
 
@@ -610,60 +565,36 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 func (cfg *apiConfig) deleteChirpByIDHandler(response http.ResponseWriter, request *http.Request) {
 	chirpID := request.PathValue("chirpID")
 	if len(chirpID) == 0 {
-		log.Printf("Could not retrieve chirp beacuse it needs an id")
-		errorMsg, _ := writeJsondataError("Need a chirp id")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusBadRequest)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusBadRequest, "Could not retrieve chirp beacuse it needs an id", "Need a chirp id")
 		return
 	}
 
 	bearerToken, err := auth.GetBearerToken(request.Header)
 	if err != nil {
-		log.Printf("Could not find a token in the header : %s", err)
-		errorMsg, _ := writeJsondataError("Need a token in the header")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Could not find a token in the header : %s", err), "Need a token in the header")
 		return
 	}
 
 	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
 	if err != nil {
-		log.Printf("Non valid bearer token : %s", err)
-		errorMsg, _ := writeJsondataError("Unauthorized")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid bearer token : %s", err), "Unauthorized")
 		return
 	}
 
 	chirp, err := cfg.dbQueries.GetChirp(request.Context(), uuid.MustParse(chirpID))
 	if err != nil {
-		log.Printf("Could not retrieve chirp from database : %s", err)
-		errorMsg, _ := writeJsondataError("No chirp with that id found")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusNotFound)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not retrieve chirp from database : %s", err), "No chirp with that id found")
 		return
 	}
 
 	if chirp.UserID != userID {
-		log.Printf("The user is not the owner of the chirp")
-		errorMsg, _ := writeJsondataError("Not the owner of the chirp")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusForbidden)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusForbidden, "The user is not the owner of the chirp", "Not the owner of the chirp")
 		return
 	}
 
 	err = cfg.dbQueries.DeleteChirp(request.Context(), chirp.ID)
 	if err != nil {
-		log.Printf("The chirp could not be deleted : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong when deleting the chirp")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("The chirp could not be deleted : %s", err), "Something went wrong when deleting the chirp")
 		return
 	}
 
