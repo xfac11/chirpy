@@ -214,46 +214,25 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 
 	bearerToken, err := auth.GetBearerToken(request.Header)
 	if err != nil {
-		log.Printf("No bearer token in request header : %s", err)
-		errorMsg, _ := writeJsondataError("Unauthorized")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token in request header : %s", err), "Unauthorized")
 		return
 
 	}
 	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
 	if err != nil {
-		log.Printf("Non valid bearer token : %s", err)
-		errorMsg, _ := writeJsondataError("Unauthorized")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid bearer token : %s", err), "Unauthorized")
 		return
 	}
 	var params parameters
 	decoder := json.NewDecoder(request.Body)
 	err = decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Could not decode request body into a struct: %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "json/application")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not decode request body into a struct: %s", err), "Something went wrong")
 		return
 	}
 
 	if len(params.Body) > 140 {
-		response.WriteHeader(http.StatusBadRequest)
-		jsonData, err := writeJsondataError("Chirp is too long")
-		if err != nil {
-			log.Printf("Error Marshaling response body: %s", err)
-			response.WriteHeader(http.StatusInternalServerError)
-			jsonData, _ := writeJsondataError("Something went wrong")
-			response.Write(jsonData)
-			return
-		}
-		response.Write(jsonData)
+		respondWithError(response, http.StatusBadRequest, fmt.Sprintf("Error Marshaling response body: %s", err), "Chirp is too long")
 		return
 	}
 
@@ -266,11 +245,7 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 	}
 	dbChirp, err := cfg.dbQueries.CreateChirp(request.Context(), createParams)
 	if err != nil {
-		log.Printf("Error creating chirp : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong. Probably invalid user_id")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusConflict)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusConflict, fmt.Sprintf("Error creating chirp : %s", err), "Something went wrong. Probably invalid user_id")
 		return
 	}
 
@@ -284,11 +259,7 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 
 	jsonChirp, err := json.Marshal(chirp)
 	if err != nil {
-		log.Printf("Could not marshal to json encoding of main.User: %s", err)
-		jsonData, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(jsonData)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal to json encoding of User: %s", err), "Something went wrong")
 		return
 	}
 
@@ -302,31 +273,19 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *http.Request) {
 	chirpID := request.PathValue("chirpID")
 	if len(chirpID) == 0 {
-		log.Printf("Could not retrieve chirp beacuse it needs an id")
-		errorMsg, _ := writeJsondataError("Need a chirp id")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusNotFound)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusNotFound, "Could not retrieve chirp because it needs an id", "Need a chirp id in the path")
 		return
 	}
 
 	chirpUUID, err := uuid.Parse(chirpID)
 	if err != nil {
-		log.Printf("Could not create a UUID from the pathvalue 'chirpID' : %s", err)
-		errorMsg, _ := writeJsondataError("Need a chirp id")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusNotFound)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not create a UUID from the pathvalue 'chirpID' : %s", err), "Invalid chirp id")
 		return
 	}
 
 	chirpDB, err := cfg.dbQueries.GetChirp(request.Context(), chirpUUID)
 	if err != nil {
-		log.Printf("Could not retrieve a chirp from the database. Faulty id : %s", err)
-		errorMsg, _ := writeJsondataError("Need a chirp id")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusNotFound)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not retrieve a chirp from the database. Faulty id : %s", err), "Invalid chirp id")
 		return
 	}
 
@@ -340,11 +299,7 @@ func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *htt
 
 	chirpJson, err := json.Marshal(chirp)
 	if err != nil {
-		log.Printf("Could not marshal a chirp to json chrip : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusNotFound)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not marshal a chirp to json chrip : %s", err), "Something went wrong when serialising response body")
 		return
 	}
 
@@ -357,11 +312,7 @@ func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *htt
 func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request *http.Request) {
 	dbChirps, err := cfg.dbQueries.GetAllChirps(request.Context())
 	if err != nil {
-		log.Printf("Error retreiving all chirps : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Error retreiving all chirps : %s", err), "Something went wrong when getting all chirps from the database")
 		return
 	}
 
