@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -334,20 +335,27 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 
 }
 
+func getRefreshToken(header map[string][]string, queries *database.Queries, ctx context.Context) (database.RefreshToken, error) {
+	bearerToken, err := auth.GetBearerToken(header)
+	if err != nil {
+		return database.RefreshToken{}, fmt.Errorf("No bearer token found : %s", err)
+	}
+
+	refreshToken, err := queries.GetRefreshToken(ctx, bearerToken)
+	if err != nil {
+		return database.RefreshToken{}, fmt.Errorf("No refresh token found in db : %s", err)
+	}
+	return refreshToken, nil
+}
+
 func validateRefreshToken(refreshToken database.RefreshToken) bool {
 	return refreshToken.RevokedAt.Valid || refreshToken.ExpiresAt.Before(time.Now())
 }
 
 func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http.Request) {
-	bearerToken, err := auth.GetBearerToken(request.Header)
+	refreshToken, err := getRefreshToken(request.Header, cfg.dbQueries, request.Context())
 	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token found : %s", err), "Refresh token required in the header")
-		return
-	}
-
-	refreshToken, err := cfg.dbQueries.GetRefreshToken(request.Context(), bearerToken)
-	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No refresh token found in db : %s", err), "Refresh token not present in the database")
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No refresh token: %s", err), "Refresh token not found")
 		return
 	}
 	if validateRefreshToken(refreshToken) {
@@ -388,15 +396,9 @@ func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http
 }
 
 func (cfg *apiConfig) revokeHandler(response http.ResponseWriter, request *http.Request) {
-	bearerToken, err := auth.GetBearerToken(request.Header)
+	refreshToken, err := getRefreshToken(request.Header, cfg.dbQueries, request.Context())
 	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token found : %s", err), "Refresh token required in the header")
-		return
-	}
-
-	refreshToken, err := cfg.dbQueries.GetRefreshToken(request.Context(), bearerToken)
-	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No refresh token found in db : %s", err), "Refresh token not present in the database")
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No refresh token: %s", err), "Refresh token not found")
 		return
 	}
 
@@ -465,6 +467,11 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 
 }
 
+// Gets the userID by getting the access token from the Authorization header with the prefix 'Bearer' and validate it with the secret.
+//
+// header structure:
+//
+// Authorization: "Bearer [token]"
 func getUserIDFromAccessToken(header map[string][]string, secret string) (uuid.UUID, error) {
 	bearerToken, err := auth.GetBearerToken(header)
 	if err != nil {
