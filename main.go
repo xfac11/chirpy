@@ -212,7 +212,7 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 		Body string `json:"body"`
 	}
 
-	userID, err := getUserIDFromAccessToken(request, cfg.jwtSecret)
+	userID, err := getUserIDFromAccessToken(request.Header, cfg.jwtSecret)
 	if err != nil {
 		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid access token : %s", err), "Unauthorized. Need a valid access token in the header")
 		return
@@ -423,7 +423,7 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 		return
 	}
 
-	userID, err := getUserIDFromAccessToken(request, cfg.jwtSecret)
+	userID, err := getUserIDFromAccessToken(request.Header, cfg.jwtSecret)
 	if err != nil {
 		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid access token : %s", err), "Unauthorized. Need a valid access token in the header")
 		return
@@ -465,8 +465,8 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 
 }
 
-func getUserIDFromAccessToken(request *http.Request, secret string) (uuid.UUID, error) {
-	bearerToken, err := auth.GetBearerToken(request.Header)
+func getUserIDFromAccessToken(header map[string][]string, secret string) (uuid.UUID, error) {
+	bearerToken, err := auth.GetBearerToken(header)
 	if err != nil {
 		return uuid.UUID{}, fmt.Errorf("Could not find a token in the header : %s", err)
 	}
@@ -485,7 +485,7 @@ func (cfg *apiConfig) deleteChirpByIDHandler(response http.ResponseWriter, reque
 		return
 	}
 
-	userID, err := getUserIDFromAccessToken(request, cfg.jwtSecret)
+	userID, err := getUserIDFromAccessToken(request.Header, cfg.jwtSecret)
 	if err != nil {
 		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid access token : %s", err), "Unauthorized. Need a valid access token in the header")
 		return
