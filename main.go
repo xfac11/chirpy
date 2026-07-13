@@ -212,15 +212,9 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 		Body string `json:"body"`
 	}
 
-	bearerToken, err := auth.GetBearerToken(request.Header)
+	userID, err := getUserIDFromAccessToken(request, cfg.jwtSecret)
 	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token in request header : %s", err), "Unauthorized")
-		return
-
-	}
-	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
-	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid bearer token : %s", err), "Unauthorized")
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid access token : %s", err), "Unauthorized. Need a valid access token in the header")
 		return
 	}
 	var params parameters
@@ -329,11 +323,7 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 
 	jsonChirps, err := json.Marshal(chirps)
 	if err != nil {
-		log.Printf("Could not marshal chirps into jsonchirps : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal chirps into jsonchirps : %s", err), "Something went wrong")
 		return
 	}
 
@@ -344,32 +334,24 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 
 }
 
+func validateRefreshToken(refreshToken database.RefreshToken) bool {
+	return refreshToken.RevokedAt.Valid || refreshToken.ExpiresAt.Before(time.Now())
+}
+
 func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http.Request) {
 	bearerToken, err := auth.GetBearerToken(request.Header)
 	if err != nil {
-		log.Printf("No bearer token found : %s", err)
-		errorMsg, _ := writeJsondataError("Refresh token required in the header")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token found : %s", err), "Refresh token required in the header")
 		return
 	}
 
 	refreshToken, err := cfg.dbQueries.GetRefreshToken(request.Context(), bearerToken)
 	if err != nil {
-		log.Printf("No refresh token found in db : %s", err)
-		errorMsg, _ := writeJsondataError("Refresh token not present in the database")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No refresh token found in db : %s", err), "Refresh token not present in the database")
 		return
 	}
-	if refreshToken.RevokedAt.Valid || refreshToken.ExpiresAt.Before(time.Now()) {
-		log.Printf("Refresh token expired or revoked")
-		errorMsg, _ := writeJsondataError("Refresh token expired or revoked")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+	if validateRefreshToken(refreshToken) {
+		respondWithError(response, http.StatusUnauthorized, "Refresh token expired or revoked", "Refresh token expired or revoked")
 		return
 	}
 
@@ -378,22 +360,14 @@ func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http
 	}
 	user, err := cfg.dbQueries.GetUserFromRefreshToken(request.Context(), refreshToken.Token)
 	if err != nil {
-		log.Printf("Could not find a user related to that refresh token : %s", err)
-		errorMsg, _ := writeJsondataError("Not valid refresh token")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Could not find a user related to that refresh token : %s", err), "Not valid refresh token")
 		return
 	}
 
 	expirationTime, _ := time.ParseDuration("1h")
 	accessToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, expirationTime)
 	if err != nil {
-		log.Printf("Could not create access token : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Could not create access token : %s", err), "Something went wrong when creating access token")
 		return
 	}
 
@@ -403,11 +377,7 @@ func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http
 
 	bodyJson, err := json.Marshal(body)
 	if err != nil {
-		log.Printf("Could not marshal a body to json body : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal a body to json body : %s", err), "Something went wrong serialising/marshaling response body")
 		return
 	}
 
@@ -420,31 +390,19 @@ func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http
 func (cfg *apiConfig) revokeHandler(response http.ResponseWriter, request *http.Request) {
 	bearerToken, err := auth.GetBearerToken(request.Header)
 	if err != nil {
-		log.Printf("No bearer token found : %s", err)
-		errorMsg, _ := writeJsondataError("Refresh token required in the header")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token found : %s", err), "Refresh token required in the header")
 		return
 	}
 
 	refreshToken, err := cfg.dbQueries.GetRefreshToken(request.Context(), bearerToken)
 	if err != nil {
-		log.Printf("No refresh token found in db : %s", err)
-		errorMsg, _ := writeJsondataError("Refresh token not present in the database")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusUnauthorized)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No refresh token found in db : %s", err), "Refresh token not present in the database")
 		return
 	}
 
 	err = cfg.dbQueries.UpdateRefreshToken(request.Context(), refreshToken.Token)
 	if err != nil {
-		log.Printf("Could not revoke refresh token in db : %s", err)
-		errorMsg, _ := writeJsondataError("Something went wrong when revoking")
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write(errorMsg)
+		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not revoke refresh token in db : %s", err), "Something went wrong when revoking refresh token")
 		return
 	}
 
@@ -465,15 +423,9 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 		return
 	}
 
-	bearerToken, err := auth.GetBearerToken(request.Header)
+	userID, err := getUserIDFromAccessToken(request, cfg.jwtSecret)
 	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No bearer token found : %s", err), "Access token required in the header")
-		return
-	}
-
-	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
-	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Invalid access token : %s", err), "Invalid access token")
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid access token : %s", err), "Unauthorized. Need a valid access token in the header")
 		return
 	}
 
@@ -513,6 +465,19 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 
 }
 
+func getUserIDFromAccessToken(request *http.Request, secret string) (uuid.UUID, error) {
+	bearerToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		return uuid.UUID{}, fmt.Errorf("Could not find a token in the header : %s", err)
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, secret)
+	if err != nil {
+		return uuid.UUID{}, fmt.Errorf("Non valid bearer token : %s", err)
+	}
+	return userID, nil
+}
+
 func (cfg *apiConfig) deleteChirpByIDHandler(response http.ResponseWriter, request *http.Request) {
 	chirpID := request.PathValue("chirpID")
 	if len(chirpID) == 0 {
@@ -520,15 +485,9 @@ func (cfg *apiConfig) deleteChirpByIDHandler(response http.ResponseWriter, reque
 		return
 	}
 
-	bearerToken, err := auth.GetBearerToken(request.Header)
+	userID, err := getUserIDFromAccessToken(request, cfg.jwtSecret)
 	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Could not find a token in the header : %s", err), "Need a token in the header")
-		return
-	}
-
-	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
-	if err != nil {
-		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid bearer token : %s", err), "Unauthorized")
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("Non valid access token : %s", err), "Unauthorized. Need a valid access token in the header")
 		return
 	}
 
