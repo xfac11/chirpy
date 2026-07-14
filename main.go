@@ -112,24 +112,24 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 		Email:     dbUser.Email,
 	}
 
-	jsonUser, err := json.Marshal(user)
+	err = respondWithJson(response, http.StatusCreated, user)
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal to json encoding of main.User: %s", err), "Something went wrong")
 		return
 	}
 
 	log.Printf("Successfully created a user with id: %s", user.ID)
-	response.Header().Set("Content-Type", "application/json")
-	response.WriteHeader(http.StatusCreated)
-	response.Write(jsonUser)
 }
 
 func respondWithError(response http.ResponseWriter, statusCode int, logMsg, clientMsg string) {
 	log.Printf(logMsg)
-	errorMsg, _ := writeJsondataError(clientMsg)
-	response.Header().Set("Content-Type", "json/application")
-	response.WriteHeader(statusCode)
-	response.Write(errorMsg)
+	type returnVals struct {
+		Error string `json:"error"`
+	}
+	respBody := returnVals{
+		Error: clientMsg,
+	}
+	respondWithJson(response, statusCode, respBody)
 }
 
 func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.Request) {
@@ -322,19 +322,25 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 		})
 	}
 
-	jsonChirps, err := json.Marshal(chirps)
+	err = respondWithJson(response, http.StatusOK, chirps)
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal chirps into jsonchirps : %s", err), "Something went wrong")
 		return
 	}
 
 	log.Printf("Retrieved all chirps and sending them")
-	response.Header().Set("Content-Type", "application/json")
-	response.WriteHeader(http.StatusOK)
-	response.Write(jsonChirps)
 
 }
-
+func respondWithJson(responseWriter http.ResponseWriter, statusCode int, v any) error {
+	jsonData, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("Could not marshal chirps into jsonchirps : %s", err)
+	}
+	responseWriter.Header().Set("Content-Type", "application/json")
+	responseWriter.WriteHeader(statusCode)
+	responseWriter.Write(jsonData)
+	return nil
+}
 func getRefreshToken(header map[string][]string, queries *database.Queries, ctx context.Context) (database.RefreshToken, error) {
 	bearerToken, err := auth.GetBearerToken(header)
 	if err != nil {
@@ -524,17 +530,6 @@ func middlewareLog(next http.Handler) http.Handler {
 		log.Printf("%s %s", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
-}
-
-func writeJsondataError(text string) ([]byte, error) {
-	type returnVals struct {
-		Error string `json:"error"`
-	}
-	respBody := returnVals{
-		Error: text,
-	}
-	jsonData, err := json.Marshal(respBody)
-	return jsonData, err
 }
 
 func removeProfanity(text string, badWords []string, replace string) string {
