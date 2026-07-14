@@ -196,16 +196,13 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		RefreshToken: refreshToken,
 	}
 
-	jsonBody, err := json.Marshal(body)
+	err = respondWithJson(response, http.StatusOK, body)
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal to json encoding of main.User: %s", err), "Something went wrong on the server")
 		return
 	}
 
 	log.Printf("Email and password matched. Sending user resource")
-	response.Header().Set("Content-Type", "application/json")
-	response.WriteHeader(http.StatusOK)
-	response.Write(jsonBody)
 }
 
 func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *http.Request) {
@@ -244,25 +241,25 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 		return
 	}
 
-	chirp := Chirp{
-		ID:        dbChirp.ID,
-		CreatedAt: dbChirp.CreatedAt,
-		UpdatedAt: dbChirp.UpdatedAt,
-		Body:      dbChirp.Body,
-		User_ID:   dbChirp.UserID,
-	}
+	chirp := makeChirpFromDBChirp(dbChirp)
 
-	jsonChirp, err := json.Marshal(chirp)
+	err = respondWithJson(response, http.StatusCreated, chirp)
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal to json encoding of User: %s", err), "Something went wrong")
 		return
 	}
 
 	log.Printf("Successfully created a chirp with id: %s", chirp.ID)
-	response.Header().Set("Content-Type", "application/json")
-	response.WriteHeader(http.StatusCreated)
-	response.Write(jsonChirp)
+}
 
+func makeChirpFromDBChirp(dbChirp database.Chirp) Chirp {
+	return Chirp{
+		ID:        dbChirp.ID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		Body:      dbChirp.Body,
+		User_ID:   dbChirp.UserID,
+	}
 }
 
 func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *http.Request) {
@@ -284,24 +281,15 @@ func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *htt
 		return
 	}
 
-	chirp := Chirp{
-		ID:        chirpDB.ID,
-		CreatedAt: chirpDB.CreatedAt,
-		UpdatedAt: chirpDB.UpdatedAt,
-		Body:      chirpDB.Body,
-		User_ID:   chirpDB.UserID,
-	}
+	chirp := makeChirpFromDBChirp(chirpDB)
 
-	chirpJson, err := json.Marshal(chirp)
+	err = respondWithJson(response, http.StatusOK, chirp)
 	if err != nil {
 		respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not marshal a chirp to json chrip : %s", err), "Something went wrong when serialising response body")
 		return
 	}
 
 	log.Printf("Successfully sent one chirp")
-	response.Header().Set("Content-Type", "application/json")
-	response.WriteHeader(http.StatusOK)
-	response.Write(chirpJson)
 }
 
 func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request *http.Request) {
@@ -313,13 +301,7 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 
 	chirps := make([]Chirp, 0, len(dbChirps))
 	for _, dbChirp := range dbChirps {
-		chirps = append(chirps, Chirp{
-			ID:        dbChirp.ID,
-			CreatedAt: dbChirp.CreatedAt,
-			UpdatedAt: dbChirp.UpdatedAt,
-			Body:      dbChirp.Body,
-			User_ID:   dbChirp.UserID,
-		})
+		chirps = append(chirps, makeChirpFromDBChirp(dbChirp))
 	}
 
 	err = respondWithJson(response, http.StatusOK, chirps)
@@ -334,7 +316,7 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 func respondWithJson(responseWriter http.ResponseWriter, statusCode int, v any) error {
 	jsonData, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("Could not marshal chirps into jsonchirps : %s", err)
+		return fmt.Errorf("Could not marshal/serialize v: %s", err)
 	}
 	responseWriter.Header().Set("Content-Type", "application/json")
 	responseWriter.WriteHeader(statusCode)
@@ -389,16 +371,13 @@ func (cfg *apiConfig) refreshHandler(response http.ResponseWriter, request *http
 		Token: accessToken,
 	}
 
-	bodyJson, err := json.Marshal(body)
+	err = respondWithJson(response, http.StatusOK, body)
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal a body to json body : %s", err), "Something went wrong serialising/marshaling response body")
 		return
 	}
 
 	log.Printf("Successfully refreshed token")
-	response.Header().Set("Content-Type", "application/json")
-	response.WriteHeader(http.StatusOK)
-	response.Write(bodyJson)
 }
 
 func (cfg *apiConfig) revokeHandler(response http.ResponseWriter, request *http.Request) {
@@ -460,15 +439,12 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 		UpdatedAt: updatedUser.UpdatedAt,
 		Email:     updatedUser.Email,
 	}
-	userData, err := json.Marshal(userResource)
+
+	err = respondWithJson(response, http.StatusOK, userResource)
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal updated user to user resource : %s", err), "Something went wrong")
 		return
 	}
-
-	response.Header().Set("Content-Type", "application/json")
-	response.WriteHeader(http.StatusOK)
-	response.Write(userData)
 	log.Printf("Successfully updated user email and password")
 
 }
