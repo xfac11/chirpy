@@ -205,6 +205,17 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 	log.Printf("Email and password matched. Sending user resource")
 }
 
+func validateChirpBody(body string) (string, error) {
+	if len(body) > 140 {
+		return "", fmt.Errorf("Chirp is too long")
+	}
+
+	badWords := []string{"kerfuffle", "sharbert", "fornax"}
+	censoredBody := removeProfanity(body, badWords, "****")
+
+	return censoredBody, nil
+}
+
 func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
@@ -223,17 +234,15 @@ func (cfg *apiConfig) createChirpHandler(response http.ResponseWriter, request *
 		return
 	}
 
-	if len(params.Body) > 140 {
-		respondWithError(response, http.StatusBadRequest, fmt.Sprintf("Error Marshaling response body: %s", err), "Chirp is too long")
+	validatedBody, err := validateChirpBody(params.Body)
+	if err != nil {
+		respondWithError(response, http.StatusBadRequest, fmt.Sprintf("Error validating chrip body: %s", err), "Chirp is too long")
 		return
 	}
 
-	badWords := []string{"kerfuffle", "sharbert", "fornax"}
-	censoredBody := removeProfanity(params.Body, badWords, "****")
-
 	createParams := database.CreateChirpParams{
 		UserID: userID,
-		Body:   censoredBody,
+		Body:   validatedBody,
 	}
 	dbChirp, err := cfg.dbQueries.CreateChirp(request.Context(), createParams)
 	if err != nil {
