@@ -27,10 +27,13 @@ type apiConfig struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID            uuid.UUID `json:"id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Email         string    `json:"email"`
+	Token         string    `json:"token"`
+	RefreshToken  string    `json:"refresh_token"`
+	Is_Chirpy_Red bool      `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -106,10 +109,11 @@ func (cfg *apiConfig) createUserHandler(response http.ResponseWriter, request *h
 	}
 
 	user := User{
-		ID:        dbUser.ID,
-		CreatedAt: dbUser.CreatedAt,
-		UpdatedAt: dbUser.UpdatedAt,
-		Email:     dbUser.Email,
+		ID:            dbUser.ID,
+		CreatedAt:     dbUser.CreatedAt,
+		UpdatedAt:     dbUser.UpdatedAt,
+		Email:         dbUser.Email,
+		Is_Chirpy_Red: dbUser.IsChirpyRed,
 	}
 
 	err = respondWithJson(response, http.StatusCreated, user)
@@ -178,25 +182,18 @@ func (cfg *apiConfig) loginHandler(response http.ResponseWriter, request *http.R
 		return
 	}
 	log.Printf("Created a refresh token inside database at %s", dbRefreshToken.CreatedAt)
-	type Body struct {
-		ID           uuid.UUID `json:"id"`
-		CreatedAt    time.Time `json:"created_at"`
-		UpdatedAt    time.Time `json:"updated_at"`
-		Email        string    `json:"email"`
-		Token        string    `json:"token"`
-		RefreshToken string    `json:"refresh_token"`
+
+	user := User{
+		ID:            dbUser.ID,
+		CreatedAt:     dbUser.CreatedAt,
+		UpdatedAt:     dbUser.UpdatedAt,
+		Email:         dbUser.Email,
+		Token:         signedToken,
+		RefreshToken:  refreshToken,
+		Is_Chirpy_Red: dbUser.IsChirpyRed,
 	}
 
-	body := Body{
-		ID:           dbUser.ID,
-		CreatedAt:    dbUser.CreatedAt,
-		UpdatedAt:    dbUser.UpdatedAt,
-		Email:        dbUser.Email,
-		Token:        signedToken,
-		RefreshToken: refreshToken,
-	}
-
-	err = respondWithJson(response, http.StatusOK, body)
+	err = respondWithJson(response, http.StatusOK, user)
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Could not marshal to json encoding of main.User: %s", err), "Something went wrong on the server")
 		return
@@ -443,10 +440,11 @@ func (cfg *apiConfig) updateUserHandler(response http.ResponseWriter, request *h
 	}
 
 	userResource := User{
-		ID:        updatedUser.ID,
-		CreatedAt: updatedUser.CreatedAt,
-		UpdatedAt: updatedUser.UpdatedAt,
-		Email:     updatedUser.Email,
+		ID:            updatedUser.ID,
+		CreatedAt:     updatedUser.CreatedAt,
+		UpdatedAt:     updatedUser.UpdatedAt,
+		Email:         updatedUser.Email,
+		Is_Chirpy_Red: updatedUser.IsChirpyRed,
 	}
 
 	err = respondWithJson(response, http.StatusOK, userResource)
@@ -508,6 +506,37 @@ func (cfg *apiConfig) deleteChirpByIDHandler(response http.ResponseWriter, reque
 
 	log.Printf("The chirp with id: %s was deleted by the author: %s", chirp.ID, userID)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+func (cfg *apiConfig) polkaWebhookHandler(response http.ResponseWriter, request *http.Request) {
+	type polkaWebhookRequest struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID uuid.UUID `json:"user_id"`
+		} `json:"data"`
+	}
+
+	var polkaRequest polkaWebhookRequest
+	decoder := json.NewDecoder(request.Body)
+	err := decoder.Decode(&polkaRequest)
+	if err != nil {
+		respondWithError(response, http.StatusBadRequest, fmt.Sprintf("Could not decode to polkaWebhookRequest: %s", err), "Something was wrong with the request body")
+		return
+	}
+
+	if polkaRequest.Event != "user.upgraded" {
+		response.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	err = cfg.dbQueries.UpgradeUserToChirpyRed(context.Background(), polkaRequest.Data.UserID)
+	if err != nil {
+		respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not upgrade user. Probably not found: %s", err), "User cant be found")
+		return
+	}
+
+	response.WriteHeader(http.StatusNoContent)
+
 }
 
 // Prints out the method and the url path before serving the handler
@@ -577,6 +606,7 @@ func main() {
 	serveMux.Handle("POST /api/revoke", middlewareLog(http.HandlerFunc(apiConfig.revokeHandler)))
 	serveMux.Handle("PUT /api/users", middlewareLog(http.HandlerFunc(apiConfig.updateUserHandler)))
 	serveMux.Handle("DELETE /api/chirps/{chirpID}", middlewareLog(http.HandlerFunc(apiConfig.deleteChirpByIDHandler)))
+	serveMux.Handle("POST /api/polka/webhooks", middlewareLog(http.HandlerFunc(apiConfig.polkaWebhookHandler)))
 	server := http.Server{
 		Addr:    ":8080",
 		Handler: serveMux,
