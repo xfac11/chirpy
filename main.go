@@ -24,6 +24,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform       string
 	jwtSecret      string
+	polkaAPIKey    string
 }
 
 type User struct {
@@ -516,9 +517,19 @@ func (cfg *apiConfig) polkaWebhookHandler(response http.ResponseWriter, request 
 		} `json:"data"`
 	}
 
+	apiKey, err := auth.GetAPIKey(request.Header)
+	if err != nil {
+		respondWithError(response, http.StatusUnauthorized, fmt.Sprintf("No authirization header with an api key found: %s", err), "Unauthorized, need a valid api key")
+		return
+	}
+	if apiKey != cfg.polkaAPIKey {
+		respondWithError(response, http.StatusUnauthorized, "API key found but not valid polka key. Non equal to servers api key", "Unauthorized, need a valid api key")
+		return
+	}
+
 	var polkaRequest polkaWebhookRequest
 	decoder := json.NewDecoder(request.Body)
-	err := decoder.Decode(&polkaRequest)
+	err = decoder.Decode(&polkaRequest)
 	if err != nil {
 		respondWithError(response, http.StatusBadRequest, fmt.Sprintf("Could not decode to polkaWebhookRequest: %s", err), "Something was wrong with the request body")
 		return
@@ -590,6 +601,7 @@ func main() {
 		dbQueries:      database.New(db),
 		platform:       os.Getenv("PLATFORM"),
 		jwtSecret:      jwtSecret,
+		polkaAPIKey:    os.Getenv("POLKA_KEY"),
 	}
 
 	serveMux := http.NewServeMux()

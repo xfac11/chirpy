@@ -95,3 +95,21 @@ func MakeRefreshToken() string {
 
 	return refreshToken
 }
+
+// Returns the Api key in the header.
+// If no Authorization header is present or no Api key were found an error and an empty string is returned
+func GetAPIKey(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("Authorization header doesn't exist")
+	}
+
+	authHeader, found := strings.CutPrefix(authHeader, "ApiKey")
+	if !found {
+		return "", fmt.Errorf("Authorization header exists but no ApiKey found")
+	}
+
+	authHeader = strings.TrimSpace(authHeader)
+
+	return authHeader, nil
+}

@@ -119,3 +119,16 @@ func TestAuthHeaderInvalidSyntax(t *testing.T) {
 		t.Error("Should error cause wrong syntax in the Authorization header")
 	}
 }
+
+func TestAuthHeaderApiKey(t *testing.T) {
+	header := http.Header{}
+	header.Add("Authorization", "ApiKey 231mkjnasd82")
+	apiKey, err := GetAPIKey(header)
+	if err != nil {
+		t.Error("Should not error cause right syntax in the Authorization header")
+	}
+
+	if apiKey != "231mkjnasd82" {
+		t.Errorf("Token is not the same. It should be 231mkjnasd82 but is %s", apiKey)
+	}
+}
