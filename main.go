@@ -299,8 +299,29 @@ func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *htt
 	log.Printf("Successfully sent one chirp")
 }
 
+// Sending all chirps and can filter using a query parameter 'author_id' which only sends the chirps which belongs to that author
 func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request *http.Request) {
-	dbChirps, err := cfg.dbQueries.GetAllChirps(request.Context())
+	err := request.ParseForm()
+	var dbChirps []database.Chirp
+	if request.Form.Has("author_id") {
+		author_id := request.Form.Get("author_id")
+		user_uuid, err := uuid.Parse(author_id)
+		if err != nil {
+			respondWithError(response, http.StatusNotFound, fmt.Sprintf("The author id could not be made into a uuid: %s", err), "Need a valid author/user id")
+			return
+		}
+		dbChirps, err = cfg.dbQueries.GetAllChripsFromAuthor(request.Context(), user_uuid)
+		if err != nil {
+			respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not get all chirps from the user in the database: %s", err), "Something went wrong when querying the chirps for that user. Probably wrong id")
+			return
+		}
+	} else {
+		dbChirps, err = cfg.dbQueries.GetAllChirps(request.Context())
+		if err != nil {
+			respondWithError(response, http.StatusNotFound, fmt.Sprintf("Could not get all chirps from the database: %s", err), "Something went wrong when querying all chirps")
+			return
+		}
+	}
 	if err != nil {
 		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Error retreiving all chirps : %s", err), "Something went wrong when getting all chirps from the database")
 		return
