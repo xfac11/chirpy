@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -299,9 +300,17 @@ func (cfg *apiConfig) getChirpHandler(response http.ResponseWriter, request *htt
 	log.Printf("Successfully sent one chirp")
 }
 
-// Sending all chirps and can filter using a query parameter 'author_id' which only sends the chirps which belongs to that author
+// Sending all chirps with available query parameters:
+//
+// author_id : only send chirps belonging to this user/author
+//
+// sort: Use 'asc' or 'desc' to sort the chirps in ascending or descending order. asc is default
 func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request *http.Request) {
 	err := request.ParseForm()
+	if err != nil {
+		respondWithError(response, http.StatusBadRequest, fmt.Sprintf("Could not parse the request form: %s", err), "Something went wrong when parsing the request.")
+		return
+	}
 	var dbChirps []database.Chirp
 	if request.Form.Has("author_id") {
 		author_id := request.Form.Get("author_id")
@@ -322,14 +331,27 @@ func (cfg *apiConfig) getAllChirpsHandler(response http.ResponseWriter, request 
 			return
 		}
 	}
-	if err != nil {
-		respondWithError(response, http.StatusInternalServerError, fmt.Sprintf("Error retreiving all chirps : %s", err), "Something went wrong when getting all chirps from the database")
-		return
-	}
 
 	chirps := make([]Chirp, 0, len(dbChirps))
 	for _, dbChirp := range dbChirps {
 		chirps = append(chirps, makeChirpFromDBChirp(dbChirp))
+	}
+
+	var sortOrder string
+	if request.Form.Has("sort") {
+		sortOrder = request.Form.Get("sort")
+	}
+
+	if sortOrder == "desc" {
+		slices.SortFunc(chirps, func(a, b Chirp) int {
+			if a.CreatedAt.Before(b.CreatedAt) {
+				return 1
+			} else if a.CreatedAt.After(b.CreatedAt) {
+				return -1
+			} else {
+				return 0
+			}
+		})
 	}
 
 	err = respondWithJson(response, http.StatusOK, chirps)
